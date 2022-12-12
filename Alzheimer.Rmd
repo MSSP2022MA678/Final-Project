@@ -3,8 +3,8 @@ title: "Alzheimer Prediction - Multilevel Regression Analysis"
 author: "Hao He"
 date: "2022-11-30"
 output:
-  pdf_document: default
   html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE,message=FALSE}
@@ -44,7 +44,7 @@ scans, it is still hard for doctors to assess whether a patient's condition
 surely can be diagnosed with dementia at as early as possible. This analysis 
 aims to figure out if it is possible to predict who has Alzheimer's by using 
 the multilevel logistic model after some signs are noticed and which factor(s) 
-would be influential. The result suggest that MMSE test result, age in years and
+would be influential. The result suggests that MMSE test result, age in years and
 years of education are important factors.
 
 ## Introduction
@@ -140,7 +140,7 @@ patients <- patients %>% rename(Gender = `M/F`) %>% rename(pid = `Subject ID` )
 
 After initial screening of data, I found there are 21 missing values in this 
 dataset, I kept them for EDA part to avoid mishandling the data and miss any 
-patterns. Based on the OASIS FACT SHEET[2], I knew that all participants with 
+patterns. Based on the OASIS FACT SHEET [2], I knew that all participants with 
 dementia (CDR \>0) were diagnosed with probable AD. Therefore, I chose `CDR` 
 as the response variable for prediction of AD and converted it to a binary 
 variable `Response` (0 = Nondemented, 1 = Demented). 
@@ -170,7 +170,7 @@ converted <- patients %>% filter(Group == "Converted") %>% count(Visit,CDR)
 patients$Group <- str_replace(patients$Group,"Converted","Demented") %>% as.factor()
 ```
 
-###Social-Demographics Variable
+### Social-Demographics Variable
 
 The relationship between social- demographics variable and dementia are explored
 in **Figure 2** and patterns are summarized below.
@@ -250,15 +250,14 @@ more categorical and hard to interpret.
 
 -   `eTIV` and `ASF`  There is a clear linear trend in the **Figure 4**. The 
 reason why`eTIV` and `ASF` are highly correlated is that atlas normalization 
-equates head size causing the ASF to be proportional to 
-TIV[3](Buckner%20et%20al.,%202004)). I decided not to keep the `ASF` variable in
-my model.
+equates head size causing the ASF to be proportional to TIV [3]. I decided not 
+to keep the `ASF` variable in my model.
 
 -   `nWBV` and `Age`  In general, the older the people is, the smaller the brain
 volume is. Demented patients have a smaller size of brain compared to 
 nondemented patients as expected.
 
-```{r, message=FALSE, warning=FALSE, fig.cap= "Figure 4. Correlation Matrix"}
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.cap= "Figure 4. Correlation Matrix"}
 ## ggpairs assess all continuous variables
 patients %>% dplyr::select(c(Age,EDUC,SES, MMSE,eTIV,nWBV,ASF))%>% ggpairs(alpha  = 0.5, cardinality_threshold = 150, title = "Correlation Matrix")
 
@@ -276,7 +275,7 @@ are `MR delay`, `MRI ID`, and `Hand` because they are not informative for
 estimating dependent variable `Response`. After these steps, I got a 
 294-observations dataset with 1 dependent variable `Response` and 11 predictors.
 
-```{r data preprocessing, incldue=FALSE}
+```{r data preprocessing, incldue=FALSE, echo=FALSE}
 
 # Kepp only patients with total visits are less than 3
 p1 <- patients%>% filter(Visit <3)
@@ -311,7 +310,7 @@ so I transformed the `MMSE` to a log scale.
 The effect of aforementioned predictors would be natural to differ by each 
 patient, so I first constructed a varying-intercept multilevel as below.
 
-```{r include=FALSE}
+```{r include=FALSE, echo=FALSE}
 mod1 <- stan_glmer(Response ~ (1| pid) + Age + EDUC + log(MMSE) + nWBV + eTIV, data = p1, family = binomial(link = "logit" ), refresh = 0, seed = 678)
 print(mod1, digits = 4)
 ```
@@ -327,7 +326,7 @@ I decided to continue with `MMSE` at the original scale. I also noticed that
 `eTIV` has near zero coefficients, so I dropped the `eTIV` variable and continue
 with the model below.
 
-```{r include=FALSE}
+```{r include=FALSE, echo=FALSE}
 
 mod2 <- stan_glmer(Response ~ (1| pid) + Age + EDUC + MMSE + nWBV, data = p1, family = binomial("logit"), refresh = 0, seed =678)
 summary(mod2, digits = 4,probs = c(0.025, 0.975))
@@ -340,19 +339,18 @@ mod2 <- stan_glmer(Response ~  Age + EDUC + MMSE + nWBV+ (1| pid), data = p1,
 
 ```
 
-In the summary below, with the standard error of `nWBV` being 16.5, it is 
-impossible to claim that `nWBV` is an important factor for prediction. And the 
-reason is probably because `nWBV` is correlated with Age and MMSE.
-
-```{r fig.cap= "summary of mod2"}
-summary(mod2, 
-        pars = c("(Intercept)", "Age","MMSE","nWBV"),
-        probs = c(0.025, 0.975),
-        digits = 2)
-```
+With the standard error of `nWBV` being 16.5 based on the model summary in 
+Appendix, it is impossible to claim that `nWBV` is an important factor for 
+prediction. And the reason of this big standard error is probably because `nWBV`
+is correlated with Age and MMSE.
 
 But the rest of the variables still seems important in the same way. So the 
-final model and its summary is as below.
+final model and its summary is as below. 
+
+```{r,eval=FALSE}
+mod3 <- stan_glmer(Response ~ (1| pid) + Age + EDUC + MMSE, data = p1, 
+                   family = binomial(link = "logit" ))
+```
 
 ```{r echo=FALSE}
 
@@ -363,18 +361,9 @@ print(mod3, digits = 4)
 
 ```
 
-```{r,eval=FALSE}
-mod3 <- stan_glmer(Response ~ (1| pid) + Age + EDUC + MMSE, data = p1, 
-                   family = binomial(link = "logit" ))
-```
-
-Below is a part of summary of random effects of patients.
-
-```{r fig.cap= "First 5 random effects esitmate from summary of final model"}
-summary(mod2, 
-        pars = c( "b[(Intercept) pid:OAS2_0007]","b[(Intercept) pid:OAS2_0001]","b[(Intercept) pid:OAS2_0005]","b[(Intercept) pid:OAS2_0004]", "b[(Intercept) pid:OAS2_0002]"),
-        probs = c(0.025, 0.975),
-        digits = 2)
+Below is the first 6 random effects parameters of patients.
+```{r, echo=FALSE, fig.cap= "Final model - First 5 random effects parameters", }
+round(ranef(mod3)$pid,digits = 2) %>% head()
 ```
 
 ## Result
@@ -383,7 +372,7 @@ summary(mod2,
 
 The interpretation of the this model needs to fix the varying effect - patient, 
 which means the coefficients can be only interpreted as odds ratio when the 
-patient is the same.
+patient is the same. 
 
 The interpretation of fixed effects here should be similar to logistic model. 
 For example, for `Age`, a one unit increase in years of age is associated with 
@@ -403,8 +392,6 @@ interpreted qualitatively that people who are less educated are expected to have
 higher log odds of being diagnosed with Alzheimer's than people who are 
 well-educated. For `MMSE`, a one unit increase in `MMSE` score is associated 
 with a 1.4 unit decrease in the expected log odds of having Alzheimer.
-
-
 
 ### Model Checking
 
@@ -427,7 +414,7 @@ predictive accuracy. Furthermore, it is normal to see collinearity happens
 because this is a longitudinal data and the Alzheimer's is closely related with 
 age.
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.cap = "Figure 7 model check"}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.pos = 'h', fig.height = 8, fig.width =7.5, fig.cap = "Figure 7. model check"}
 # model checking
 performance::check_model(mod3)
 ```
@@ -468,7 +455,7 @@ because we have several correlated variables.
 
 \newpage
 
-## Appendix:
+## Appendix
 
 **Dataset Additional Information**
 
@@ -483,8 +470,6 @@ remained so for subsequent scans, including 51 individuals with mild to moderate
 Alzheimer's disease. Another 14 subjects were characterized as nondemented at 
 the time of their initial visit and were subsequently characterized as demented 
 at a later visit.
-
-## EDA graphs
 
 **Univariate Analysis**
 
@@ -510,8 +495,6 @@ ggplot(data = p1) +
   labs(titile = " Relationship between EDUC and SES", x = "Years of education", y = "Socioeconomic level")
 ```
 
-## Data Preprocessing
-
 **Converted Group Table**
 
 ```{r, warning = FALSE, message = FALSE, fig.cap= "Table 1. Converted Geoup Summary", echo=FALSE}
@@ -528,3 +511,15 @@ patients <- patients %>% rename(Gender = `M/F`)
 converted <- patients %>% filter(Group == "Converted") %>% count(Visit,CDR)
 converted %>% kbl(caption = "Table 1. Vist and CDR Summary") %>%  kable_classic(position = "center", html_font = "Cambria")
 ```
+
+**Model Summary**
+
+```{r fig.cap= "Summary 1. summary of mod2", echo=FALSE}
+# summary(mod2, 
+#         pars = c("(Intercept)", "Age","MMSE","nWBV"),
+#         probs = c(0.025, 0.975),
+#         digits = 2)
+print(mod2)
+```
+
+
