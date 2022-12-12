@@ -1,0 +1,344 @@
+---
+title: "Alzheimer Prediction - Multilevel Regression Analysis"
+author: "Hao He"
+date: "2022-11-30"
+output: html_document
+---
+
+```{r setup, include=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+	message = FALSE,
+	warning = FALSE)
+library(magrittr)
+library(readr)
+library(tidyverse)
+library(missMethods)
+library(ggplot2)
+library(ggcharts)
+library(ggridges)
+library(rstanarm)
+library(arm)
+library(GGally)
+library(ggcorrplot)
+library(kableExtra)
+library(gridExtra)
+library(lmerTest)
+library(merTools)
+library(lme4)
+library(car)
+library(arm)
+library(AUC)
+library(performance)
+```
+
+## Abstract
+
+Early detection of Alzheimer's Disease (AD) is essential for dementia prevention. The use of MRI imaging seems promising for early detection. However, with MRI scans, it is still hard for doctors to assess whether a patient's condition surely can be diagnosed with dementia at as early as possible. This analysis aims to figure out if it is possible to predict who has Alzheimer's by using the multilevel logistic model after some signs are noticed and which factor(s) would be influential. The result suggest that MMSE and nBWV ...
+
+## Introduction:
+
+Alzheimer's disease (AD), as the most common trigger of dementia among older people, will shrink the size of a brain and cause slow decline in memory, thought processes, language and functioning. After AD is diagnosed, the symptoms gets worse, and no existing drugs in market can cure the disease. Thus, I'm curious about what patient factors are most related to whether a patient has Alzheimer's and therefore more preventive procedures could be established in the future to slow down the deterioration of dementia. As a result, patients can hopefully extend their life expectancy.
+
+The clinical data I found is longitudinal data, so it's natural to have a group level `patient` given each patient was scanned and measured on each visits every year. The individual-level observations including patient's social demographics and other clinical test results are nested within the patient - level. Since the multilevel model is highly effective to understand the impacts of mixed effects and make prediction, I built a multilevel logistic model to reflect the nested data structure and to predict if a patient has AD and how that varies between different patients. In this analysis, how I choose variables and modeling will be elaborated in Methods section. The Result section summarizes the interpretation of final model's results and the limitations and possible improvements is reported in Discussion section.
+
+## Methods:
+
+The Longitudinal MRI Data in Nondemented and Demented Older Adults dataset in this analysis can be found on Kaggle, and it was originally published on the Open Access Series of Imaging Studies (OASIS) website as OASIS-2 [1]. In this dataset, 150 subjects aged from 60 to 96 are repeatedly measured over a period of time and information collected include group, number of visit, MR delay, gender, handedness, age, education, social economic status (SES), MMSE, CDR, eTIV, nWBV and ASF. Below is a data description for each variable [2].
+
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Data       | Description                                                                                                                                                                     |
++============+=================================================================================================================================================================================+
+| Subject ID | Identification of patients                                                                                                                                                      |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| MRI ID     | Identification of MRI scans                                                                                                                                                     |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Group      | Demented or Nondemented                                                                                                                                                         |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Visit      | The visit number                                                                                                                                                                |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| MR Delay   | The number of days between two medical visits                                                                                                                                   |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| M/F        | Gender                                                                                                                                                                          |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Hand       | Dominant Hand                                                                                                                                                                   |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Age        | Age in years                                                                                                                                                                    |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| EDUC       | Years of Education                                                                                                                                                              |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| SES        | Socioeconomic Status：Socioeconomic status as assessed by the Hollingshead Index of Social Position and classified into categories from 1 (highest status) to 5 (lowest status) |
+|            |                                                                                                                                                                                 |
+|            | 1 = upper, 2 = upper middle, 3 = middle, 4 = lower middle, 5 = lower)                                                                                                           |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| MMSE       | Mini Mental State Examination ( range: 0 (worst) - 30 (best) )                                                                                                                  |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| CDR        | Clinical Dementia Rating                                                                                                                                                        |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| eTIV       | Estimated Total Intracranial Volume                                                                                                                                             |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| nWBV       | Normalize Whole Brain Volume                                                                                                                                                    |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| ASF        | Atlas Scaling Factor                                                                                                                                                            |
++------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+```{r read data, echo=FALSE, message=FALSE}
+patients <- read_csv("oasis_longitudinal.csv")
+summary.p <- summary(patients, maxsum = 7,
+       digits = max(3, getOption("digits")-3))
+
+# Response variable is CDR and convert it to factor (0 = Nondemented, 1 = Demented)
+patients$Response<- ifelse(patients$CDR > 0, 1, 0)
+
+# Rename the `M/F` column with `Gender`, rename `Subject ID` column with `pid`
+patients <- patients %>% rename(Gender = `M/F`) %>% rename(pid = `Subject ID` )
+
+
+# colnames(patients)
+ 
+# Find NAs for each column: 
+# patients %>% summarise_all((~sum(is.na(.))))
+##`SES` column contains 19 NAs, `MMSE` contains 2 NAs, keep them for EDA
+
+```
+
+### EDA
+
+After initial screening of data, I found there are 21 missing values in this dataset, I kept them for EDA part to avoid mishandling the data and miss any patterns. Based on the OASIS FACT SHEET[2], I knew that all participants with dementia (CDR \>0) were diagnosed with probable AD. Therefore, I chose `CDR` as the response variable for prediction of AD and converted it to a binary variable `Response` (0 = Nondemented, 1 = Demented). The plots for univariate analysis is in the Appendix.
+
+I plotted each variable's distribution to make sense of what variables are more reliable to put into my model in terms of normality. In **Figure 1** (see Appendix), the majority of the variables have a distribution not too far way from from normal distribution, however the MMSE and EDUC variable may need a logarithmic transformation. The MMSE variable looks left-skewed and has a heavy tail while EDUC has a lot of peaks.
+
+According to the dementia status, patients are categorized into three groups: demented, nondemented, and converted. By examining the converted group, I found 14 patients are converted from nondemented to demented after 1 st visit, approximately half of them are detected with very mild dementia (see **Table 1** in Appendix ). To reduce speculation around when these converted patients started to have AD, I grouped the converted and demented patients together as the demented group while nondemented group remains the same. This is helpful to understand any potential patterns because the outcome variable is binary.
+
+```{r, echo=FALSE}
+# check when patients changed to demented from nondemented based on CDR and summarise
+converted <- patients %>% filter(Group == "Converted") %>% count(Visit,CDR)
+
+# Convert the converted ones to demented
+patients$Group <- str_replace(patients$Group,"Converted","Demented") %>% as.factor()
+```
+
+###Social-Demographics Variable
+
+The relationship between social- demographics variable and dementia are explored in **Figure 2** and patterns are summarized below:
+
+```{r  warning= FALSE, fig.cap= " Figure 2. Social-Demograhpics and Dementia", echo=FALSE}
+# number of patients by gender
+tbl.gender<- patients %>% distinct(pid,.keep_all = T) %>% count(Gender)
+
+# bar chart for Gender and density plot for SES, EDUC, Age 
+gender.group.bar<- patients %>% distinct(pid,.keep_all = T) %>% ggplot() + aes(x=Gender, fill = Group)+ geom_bar()+ 
+  geom_text(aes(label = after_stat(count)),stat = "count", colour = "white")+
+  labs(title = "Gender and Dementia by Group")+ylab("Number of patient")
+
+age.group.dens<- ggplot(patients) + aes(x=Age, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "Age and Dementia by Group") + ylab("Age in years")
+
+ses.group.dens<- ggplot(patients) + aes(x=SES, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "SES and Dementia by Group")+ylab("Socioeconomic Status level") 
+
+educ.group.dens<- ggplot(patients) + aes(x=EDUC, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "EDUC and Dementia by Group")+ ylab("Years of Education")
+
+grid.arrange(gender.group.bar, age.group.dens,ses.group.dens,educ.group.dens,ncol = 2)
+
+```
+
+-   `Gender` variable: The bar chart shows there are less women patients in the demented group, given we have 88 females and 62 males in this dataset.
+
+-   `Age` variable: I assessed the relationship between age and dementia with my guess being that this kind of disease starts in people's 80s and 90's. It shows that demented group has a higher proportion of patients aged from 65-85 than nondemented group. I also notice that in this dataset the nondemented group has more 90-year-old patients and I assume this is attributed to the fact that dementia reduces life expectancy.
+
+-   `SES` variable: Demented patients tend to be in a relatively lower social economic status than nondemented patients, especially in the upper middle socioeconomic status.
+
+-   `EDUC` variable: Demented group has more patients that are less than high school graduates while nondemented group has more patients that are college graduates and even beyond college level.
+
+### Clinical Variable
+
+In Figure 3, I explored all clinical variables representing brain diagnostic test to see how each of them is related to dementia. The takeaways from **Figure 3** are:
+
+- Demented patients tend to have a higher concentration in ASF measurement between 1.1 and 1.25 and a higher concentration in eTIV values between 1375 and 1500. Besides, `ASF` and `eTIV` seems to be negatively related to some extent.
+
+- Demented patients tend to have a much lower MMSE score than nondemented patients. This may indicate that the lower the MMSE score, the higher the likelihood of patients diagnosed with Alzheimer's.
+
+```{r echo=FALSE, warning=FALSE, fig.cap= "Figure 3. Different brain diagnostic test measurements and Dementia"}
+
+nwbv.group.dens<- ggplot(patients) + aes(x=nWBV, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "nWBV and Dementia by Group")
+
+mmse.group.dens <- ggplot(patients) + aes(x=MMSE, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "MMSE and Dementia by Group")
+
+asf.group.dens<- ggplot(patients) + aes(x=ASF, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "ASF and Dementia by Group")
+
+etiv.group.dens<- ggplot(patients) + aes(x=eTIV, fill=Group) +geom_density(alpha=0.2)+ylab("")+labs(title = "eTIV and Dementia by Group")
+
+grid.arrange(nwbv.group.dens, mmse.group.dens, asf.group.dens, etiv.group.dens, nrow = 2)
+```
+
+Below are some additional insights I gained about the relationship between other predictors in this dataset indicated in **Figure 4** :
+
+-  `SES` and `EDUC` : These two variables has a strong negative correlation (see **Figure 5** in Appendix) and this feature is shared in the correlation between `eTIV` and `ASF` variable, given 0.7 as my baseline of high correlation. Considering this, I decided not to keep the `SES` variable in my model as it's more categorical and hard to interpret.
+
+- `eTIV` and `ASF`: There is a clear linear trend in the **Figure 4**. The reason why`eTIV` and `ASF` are highly correlated is that atlas normalization equates head size causing the ASF to be proportional to TIV[3] (Buckner et al., 2004)). I decided not to keep the `ASF` variable in my model.
+
+-  `nWBV` and `Age`: In general, the older the people is, the smaller the brain volume is. Demented patients have a smaller size of brain compared to nondemented patients as expected. 
+
+
+```{r, message=FALSE, warning=FALSE, fig.cap= "Figure 4. Correlation Matrix"}
+## ggpairs assess all continuous variables
+patients %>% dplyr::select(c(Age,EDUC,SES, MMSE,eTIV,nWBV,ASF))%>% ggpairs(alpha  = 0.5, cardinality_threshold = 150, title = "Correlation Matrix")
+
+```
+
+### Data Preprocessing
+
+Each patient has at least two or more visits, so I kept data with total visits less than 3 to make sure I don't misinterpret the diagnosis and skew the data because my goal is trying to predict AD at a earlier time. As this dataset only includes 150 subject and the NAs are are Missing at Complete Random, I decided to impute the NAs by mean (MMSE variable) and median (SES variable) instead of remove them. Among all 13 variables, I removed three unnecessary columns, they are `MR delay`, `MRI ID`, and `Hand` because they are not informative for estimating dependent variable `Response`. After these steps, I got a 294-observations dataset with 1 dependent variable `Response` and 11 predictors.
+
+```{r data preprocessing incldue=FALSE}
+
+# Kepp only patients with total visits are less than 3
+p1 <- patients%>% filter(Visit <3)
+
+
+# remove unnecessary columns for our prediction
+p1<- p1 %>% dplyr::select(-c(`MRI ID`,Hand, `MR Delay`, Visit))
+
+
+# DOUBLE CHECK: if there is still missing value in p1 table
+# p1 %>% summarise_all((~sum(is.na(.))))
+
+
+# Imputation for missing values (as the NA is MCAR)
+# Impute NA with column mean and median
+p1$MMSE[is.na(p1$MMSE)] <- round(mean(p1$MMSE, na.rm = TRUE)) 
+p1 <- impute_median(p1) # SES - discrete
+
+```
+
+### Variable Selection
+
+Based on EDA results, I have 7 predictors for variable selection, they are `Gender`, `MMSE`, `EDUC`, `nWBV`, `eTIV`, and `Age`. Among them, I decide to only keep `MMSE`, `nWBV`, `eTIV`,`EDUC`, and `Age` as predictors. In addition, as I mentioned before in EDA section, MMSE has a skewed heavy-tailed distribution and a logarithmic transformation could help to solve this issue, so I transformed the `MMSE` to a log scale.
+
+```{r}
+# Convert predictors to factor variables
+p1$pid <- as.factor(p1$pid)
+```
+
+### Model Fitting
+
+The effect of aforementioned predictors would be natural to differ by each patient, so I constructed a varying-intercept multilevel as below:
+
+```{r include=FALSE}
+mod1 <- stan_glmer(Response ~ (1 |pid) + Age + EDUC + log(MMSE) + nWBV + eTIV, data = p1, family = binomial(link = "logit" ), refresh = 0)
+summary(mod1)
+
+```
+
+```{r eval=FALSE}
+mod1 <- stan_glmer(Response ~ (1 |pid) + Age + EDUC + log(MMSE) + nWBV + eTIV, data = p1, family = binomial(link = "logit" ), refresh = 0)
+```
+
+However, the estimated coefficient is -38 with a standards error of 6.5
+```{r}
+mod2 <- stan_glmer(Response ~ (1 |pid) + Age + EDUC + MMSE + nWBV + eTIV, data = p1, family = binomial(link = "logit" ), refresh = 0)
+summary(mod2)
+
+```
+
+```{r}
+mod3 <- stan_glmer(Response ~ (1 |pid) + Age + EDUC + MMSE + log(nWBV), data = p1, family = binomial(link = "logit" ), refresh = 0)
+summary(mod2)
+```
+
+
+
+```{r include=FALSE}
+final.mod <- stan_glmer(Response ~ (1 + Age + EDUC + MMSE + nWBV + eTIV| pid) + Age + EDUC + MMSE + nWBV + eTIV, data = p1, family = binomial(link = "logit" ), refresh = 0)
+summary(mod)
+
+```
+
+
+## Result:
+
+### Interpretation and Inference
+
+
+### model checking
+
+(fitness, robustness, posterior prediction check): for the final model: - compare different metric for eval: AIC, AUC, not ANOVA; could use Likelihood ratio test, bootstrap, MCMC
+
+-   check normality, linearity, variance, outliers
+
+```{r}
+
+```
+
+
+## Discussion:
+
+This model aims to 
+Because this is an observational study and there is no treatment involved, it would be hard to make causal inference
+
+if male is has more likelihood than females, This may echos the statement that women are generally lives longer than men.
+
+**Limitation and next steps**
+
+
+-   other techqniues to consider: PCA
+-   centering method
+
+##Reference
+
+1.  <http://www.oasis-brains.org/#data>
+
+2.  <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2895005/>
+
+3.  <https://www.nia.nih.gov/health/how-alzheimers-disease-diagnosed>
+
+\newpage
+
+## Appendix:
+
+**Dataset Additional Information**
+
+This set consists of a longitudinal collection of 150 subjects aged 60 to 96. Each subject was scanned on two or more visits, separated by at least one year for a total of 373 imaging sessions. For each subject, 3 or 4 individual T1-weighted MRI scans obtained in single scan sessions are included. The subjects are all right-handed and include both men and women. 72 of the subjects were characterized as nondemented throughout the study. 64 of the included subjects were characterized as demented at the time of their initial visits and remained so for subsequent scans, including 51 individuals with mild to moderate Alzheimer's disease. Another 14 subjects were characterized as nondemented at the time of their initial visit and were subsequently characterized as demented at a later visit.
+
+## EDA graphs
+
+**Univariate Analysis**
+
+```{r, echo=FALSE, fig.height=4, fig.width=6, fig.cap = "Figure 1. Variable Distributions Plot"}
+# numeric variable
+dens.age <- ggplot(patients) + aes(x=Age) + geom_density(lwd = 1.2, linetype = 1, alpha = 0.5,fill = "darkred")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill =  "darkred")
+dens.eTIV <- ggplot(data = patients, aes(x = eTIV)) + geom_density(lwd = 1, linetype = 1, alpha = 0.5,fill = "palegreen")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "palegreen")
+dens.MMSE <- ggplot(data = patients, aes(x = MMSE)) + geom_density(lwd = 1.2, linetype = 1, alpha = 0.5,fill = "yellow3")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "yellow3")
+dens.nWBV <- ggplot(data = patients, aes(x = nWBV)) + geom_density(lwd = 1.2, linetype = 1, alpha = 0.5,fill = "hotpink")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "hotpink")
+dens.ASF <- ggplot(data = patients, aes(x = ASF)) + geom_density(lwd = 1.2, linetype = 1, alpha = 0.5,fill = "cadetblue")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "cadetblue")
+dens.EDUC <- ggplot(data = patients, aes(x = EDUC)) + geom_density(lwd = 1.2, linetype = 1, alpha = 0.5,fill = "darkorange")+geom_histogram(aes(y=after_stat(density)), bins = 30, fill = "darkorange")
+grid.arrange(dens.age, dens.eTIV, dens.MMSE, dens.nWBV, dens.ASF, dens.EDUC, ncol = 3)
+
+```
+
+**EDUC and SES**
+```{r, fig.cap = "Figure 5. Relationship between EDUC and SES"}
+ggplot(data = p1) + 
+  aes(x = EDUC, y = SES) + 
+  geom_point() + 
+  geom_smooth(formula = 'y ~ x', method = "lm") + 
+  labs(titile = " Relationship between EDUC and SES", x = "Years of education", y = "Socioeconomic level")
+```
+
+## Data Preprocessing
+
+**Converted Group Table**
+
+```{r fig.cap= Table 1. Converted Geoup Summary}
+patients <- read_csv("oasis_longitudinal.csv")
+summary.p <- summary(patients, maxsum = 7,
+       digits = max(3, getOption("digits")-3))
+
+# Response variable is CDR and convert it to factor (0 = Nondemented, 1 = Demented)
+patients$Response<- ifelse(patients$CDR > 0, 1, 0)
+
+# Rename the `M/F` column with `Gender`
+patients <- patients %>% rename(Gender = `M/F`)
+
+converted <- patients %>% filter(Group == "Converted") %>% count(Visit,CDR)
+converted %>% kbl(caption = "Table 1. Vist and CDR Summary") %>%  kable_classic(position = "center", html_font = "Cambria")
+```
+
