@@ -378,10 +378,10 @@ The interpretation of fixed effects here should be similar to logistic model.
 For example, for `Age`, a one unit increase in years of age is associated with 
 a 0.05 unit decrease in the expected log odds of having Alzheimer's. It may 
 seems not straightforward at the first glance, so I transformed the estimate to 
-a odds ratio. The odds ratio here is the conditional odds ratio for a patient 
-holding `EDUC` and `MMSE` constant as well as for a patient with the same 
-doctor, or doctors with identical random effects. The exponent of 0.05 is 
-greater than 1, it indicates that as the age of a patient increases the 
+a odds ratio. The odds ratio in this situation is the conditional odds ratio 
+for a patient holding `EDUC` and `MMSE` constant as well as for a patient was 
+measured by the same doctor with identical procedures. The exponent of 
+0.05 is greater than 1, it indicates that as the age of a patient increases the 
 predicted probability of a patient is diagnosed is lower than a patient is 
 nondemented. This contradicts with our findings in EDA, this may suggest the 
 collinearity exist.
