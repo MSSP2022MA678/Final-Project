@@ -250,7 +250,7 @@ more categorical and hard to interpret.
 
 -   `eTIV` and `ASF`  There is a clear linear trend in the **Figure 4**. The 
 reason why`eTIV` and `ASF` are highly correlated is that atlas normalization 
-equates head size causing the ASF to be proportional to TIV [3]. I decided not 
+equates head size causing the ASF to be proportional to TIV[3]. I decided not 
 to keep the `ASF` variable in my model.
 
 -   `nWBV` and `Age`  In general, the older the people is, the smaller the brain
@@ -469,7 +469,7 @@ subjects were characterized as demented at the time of their initial visits and
 remained so for subsequent scans, including 51 individuals with mild to moderate
 Alzheimer's disease. Another 14 subjects were characterized as nondemented at 
 the time of their initial visit and were subsequently characterized as demented 
-at a later visit.
+at a later visit[2].
 
 **Univariate Analysis**
 
